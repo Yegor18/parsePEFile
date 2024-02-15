@@ -1,0 +1,73 @@
+image: docker:latest
+
+services:
+  - name: docker:dind
+    entrypoint: ["env", "-u", "DOCKER_HOST"]
+    command: ["dockerd-entrypoint.sh"]
+
+variables:
+  DOCKER_HOST: tcp://docker:2375/
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: ""
+
+stages:
+  - prepare
+  - build
+  - test
+  - publish
+
+preparing:
+  stage: prepare
+  artifacts:
+    paths:
+      - $CI_BUILD_REF
+  script:
+    - docker pull jkulvich/$CI_REGISTRY_IMAGE:latest || true
+    - mkdir $CI_BUILD_REF
+    - docker save jkulvich/$CI_REGISTRY_IMAGE > $CI_BUILD_REF/$CI_REGISTRY_IMAGE.tar || true
+
+building:
+  stage: build
+  artifacts:
+    paths:
+      - $CI_BUILD_REF
+  script:
+    - docker load < $CI_BUILD_REF/$CI_REGISTRY_IMAGE.tar || true
+    - docker build -f dockerfile --cache-from jkulvich/$CI_REGISTRY_IMAGE:latest --tag jkulvich/$CI_REGISTRY_IMAGE:$([ -z $CI_COMMIT_TAG ] && echo $CI_COMMIT_SHA || echo $CI_COMMIT_TAG) --tag jkulvich/$CI_REGISTRY_IMAGE:latest .
+    - docker save jkulvich/$CI_REGISTRY_IMAGE > $CI_BUILD_REF/$CI_REGISTRY_IMAGE.tar
+
+publishing:
+  stage: publish
+  artifacts:
+    paths:
+      - $CI_BUILD_REF
+  only:
+    - tags
+  script:
+    - echo $CI_REGISTRY_PASSWORD | docker login -u $CI_REGISTRY_USER --password-stdin
+    - docker load < $CI_BUILD_REF/$CI_REGISTRY_IMAGE.tar
+    - docker push jkulvich/$CI_REGISTRY_IMAGE:latest
+    - docker push jkulvich/$CI_REGISTRY_IMAGE:$CI_COMMIT_TAG
+
+
+#image: node:latest
+#
+#cache:
+#  paths:
+#    - node_modules/
+#
+#stages:
+#    - build
+#    - test
+#
+#building:
+#  stage: build
+#  script:
+#    - npm install
+#    - npm run build
+#
+#testing:
+#  stage: test
+#  script:
+#    - npm install
+#    - npm run test:unit
